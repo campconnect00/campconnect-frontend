@@ -1,25 +1,30 @@
 import React from 'react';
-import logo from './logo.svg';
-import './App.css';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { ThemeProvider } from './context/ThemeContext';
+import { Dashboard } from './pages/Dashboard';
+import { Inventory } from './pages/Inventory';
+import { Suppliers } from './pages/Suppliers';
+import { Impact } from './pages/Impact';
+import { AIAgents } from './pages/AIAgents';
+import { Settings } from './pages/Settings';
+import { Transparency } from './pages/Transparency';
 
 function App() {
   return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.tsx</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
-    </div>
+    <ThemeProvider>
+      <Router>
+        <Routes>
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/inventory" element={<Inventory />} />
+          <Route path="/suppliers" element={<Suppliers />} />
+          <Route path="/impact" element={<Impact />} />
+          <Route path="/agents" element={<AIAgents />} />
+          <Route path="/transparency" element={<Transparency />} />
+          <Route path="/settings" element={<Settings />} />
+        </Routes>
+      </Router>
+    </ThemeProvider>
   );
 }
 
