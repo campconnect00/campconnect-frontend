@@ -1,6 +1,18 @@
-import React, { useState, useCallback } from 'react';
-import { GoogleMap, useJsApiLoader, Marker, Circle, InfoWindow } from '@react-google-maps/api';
-import { MapPin, Home, AlertCircle } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import Map from 'ol/Map';
+import View from 'ol/View';
+import TileLayer from 'ol/layer/Tile';
+import VectorLayer from 'ol/layer/Vector';
+import VectorSource from 'ol/source/Vector';
+import OSM from 'ol/source/OSM';
+import Feature from 'ol/Feature';
+import Point from 'ol/geom/Point';
+import Circle from 'ol/geom/Circle';
+import { fromLonLat } from 'ol/proj';
+import { Style, Fill, Stroke, Text, Circle as CircleStyle } from 'ol/style';
+import Overlay from 'ol/Overlay';
+import 'ol/ol.css';
+import { MapPin, Home } from 'lucide-react';
 import { Vendor } from '../../data/mockData';
 
 interface MapViewProps {
@@ -9,44 +21,20 @@ interface MapViewProps {
     onSelectVendor: (vendor: Vendor) => void;
 }
 
-// Camp Kakuma coordinates (approximate)
-const CAMP_CENTER = {
-    lat: 3.7176,
-    lng: 34.8289
-};
-
-const mapContainerStyle = {
-    width: '100%',
-    height: '100%',
-    minHeight: '500px',
-};
-
-const mapOptions = {
-    disableDefaultUI: false,
-    zoomControl: true,
-    streetViewControl: false,
-    mapTypeControl: true,
-    fullscreenControl: true,
-    styles: [
-        {
-            featureType: 'poi',
-            elementType: 'labels',
-            stylers: [{ visibility: 'off' }],
-        },
-    ],
-};
+// Camp Kakuma coordinates
+const CAMP_CENTER: [number, number] = [34.8289, 3.7176]; // [lng, lat]
 
 // Generate vendor positions around the camp
-const getVendorPosition = (vendor: Vendor, index: number, total: number) => {
+const getVendorPosition = (vendor: Vendor, index: number, total: number): [number, number] => {
     const angle = (index / total) * 2 * Math.PI;
-    const distanceInDegrees = vendor.distance * 0.009; // Approximate conversion
-    return {
-        lat: CAMP_CENTER.lat + distanceInDegrees * Math.sin(angle),
-        lng: CAMP_CENTER.lng + distanceInDegrees * Math.cos(angle),
-    };
+    const distanceInDegrees = vendor.distance * 0.009;
+    return [
+        CAMP_CENTER[0] + distanceInDegrees * Math.cos(angle),
+        CAMP_CENTER[1] + distanceInDegrees * Math.sin(angle),
+    ];
 };
 
-// Get pin color based on average agent score
+// Get marker color based on average agent score
 const getMarkerColor = (vendor: Vendor) => {
     const avgScore = (vendor.agentScores.sustainability + vendor.agentScores.cultural + vendor.agentScores.economic) / 3;
     if (avgScore >= 85) return '#22c55e'; // green
@@ -54,253 +42,240 @@ const getMarkerColor = (vendor: Vendor) => {
     return '#9ca3af'; // gray
 };
 
-// Fallback map component when Google Maps fails to load
-const FallbackMap: React.FC<MapViewProps> = ({ vendors, selectedVendor, onSelectVendor }) => {
-    const getVendorPositionCSS = (vendor: Vendor, index: number) => {
-        const angle = (index / vendors.length) * 2 * Math.PI;
-        const normalizedDistance = Math.min(vendor.distance / 50, 1);
-        const radius = 30 + normalizedDistance * 30;
-        return {
-            left: `${50 + radius * Math.cos(angle)}%`,
-            top: `${50 + radius * Math.sin(angle)}%`,
-        };
-    };
-
-    return (
-        <div className="relative h-full min-h-[500px] bg-gradient-to-br from-blue-50 via-green-50 to-blue-50 rounded-lg overflow-hidden">
-            {/* Distance rings */}
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="absolute w-[80%] h-[80%] rounded-full border-2 border-dashed border-gray-300" />
-                <div className="absolute w-[55%] h-[55%] rounded-full border-2 border-dashed border-gray-300" />
-                <div className="absolute w-[30%] h-[30%] rounded-full border-2 border-dashed border-gray-300" />
-            </div>
-
-            {/* Camp marker */}
-            <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10">
-                <div className="w-12 h-12 rounded-full bg-blue-600 flex items-center justify-center shadow-lg border-4 border-white">
-                    <Home className="w-6 h-6 text-white" />
-                </div>
-                <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 whitespace-nowrap">
-                    <span className="text-xs font-semibold bg-blue-600 text-white px-2 py-1 rounded-full shadow">
-                        Camp Kakuma
-                    </span>
-                </div>
-            </div>
-
-            {/* Vendor pins */}
-            {vendors.map((vendor, index) => {
-                const position = getVendorPositionCSS(vendor, index);
-                const isSelected = selectedVendor?.id === vendor.id;
-                const pinColor = getMarkerColor(vendor);
-
-                return (
-                    <div
-                        key={vendor.id}
-                        className="absolute -translate-x-1/2 -translate-y-1/2 cursor-pointer group z-20"
-                        style={{ left: position.left, top: position.top }}
-                        onClick={() => onSelectVendor(vendor)}
-                    >
-                        <div className={`relative transition-transform duration-200 ${isSelected ? 'scale-125 z-30' : 'hover:scale-110'}`}>
-                            <div
-                                className="w-10 h-10 rounded-full flex items-center justify-center shadow-lg"
-                                style={{
-                                    backgroundColor: pinColor,
-                                    border: isSelected ? '3px solid #3b82f6' : '2px solid white',
-                                }}
-                            >
-                                <MapPin className="w-5 h-5 text-white" />
-                            </div>
-                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
-                                <div className="bg-gray-900 text-white text-xs rounded-lg px-3 py-2 shadow-lg whitespace-nowrap">
-                                    <div className="font-semibold">{vendor.name}</div>
-                                    <div className="text-gray-300">{vendor.distance} km away</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                );
-            })}
-
-            {/* Legend */}
-            <div className="absolute bottom-4 left-4 bg-white/90 backdrop-blur rounded-lg p-3 shadow-sm border border-gray-200">
-                <p className="text-xs font-semibold text-gray-700 mb-2">Agent Scores</p>
-                <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-green-500" />
-                        <span className="text-xs text-gray-600">High (&gt;85%)</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-yellow-400" />
-                        <span className="text-xs text-gray-600">Medium (70-85%)</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-gray-400" />
-                        <span className="text-xs text-gray-600">Lower (&lt;70%)</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
-};
-
 export const MapView: React.FC<MapViewProps> = ({
     vendors,
     selectedVendor,
     onSelectVendor,
 }) => {
-    const [activeMarker, setActiveMarker] = useState<string | null>(null);
+    const mapRef = useRef<HTMLDivElement>(null);
+    const mapInstanceRef = useRef<Map | null>(null);
+    const popupRef = useRef<HTMLDivElement>(null);
+    const [popupContent, setPopupContent] = useState<Vendor | null>(null);
 
-    // Load Google Maps - you'll need to add your API key to .env
-    const { isLoaded, loadError } = useJsApiLoader({
-        googleMapsApiKey: process.env.REACT_APP_GOOGLE_MAPS_API_KEY || '',
-        // If no API key, the map won't load and we'll show the fallback
-    });
+    useEffect(() => {
+        if (!mapRef.current) return;
 
-    const onMapClick = useCallback(() => {
-        setActiveMarker(null);
-    }, []);
+        // Create camp marker feature
+        const campFeature = new Feature({
+            geometry: new Point(fromLonLat(CAMP_CENTER)),
+            name: 'Camp Kakuma',
+            type: 'camp',
+        });
 
-    const handleMarkerClick = (vendor: Vendor) => {
-        setActiveMarker(vendor.id);
-        onSelectVendor(vendor);
-    };
-
-    // Show fallback if no API key or loading error
-    if (!process.env.REACT_APP_GOOGLE_MAPS_API_KEY || loadError) {
-        return (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden h-full min-h-[500px]">
-                <div className="px-4 py-3 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-white">
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <h3 className="font-semibold text-gray-900">Vendor Map</h3>
-                            <p className="text-xs text-gray-500">Click pins to view vendor details</p>
-                        </div>
-                        {!process.env.REACT_APP_GOOGLE_MAPS_API_KEY && (
-                            <div className="flex items-center gap-1 text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded">
-                                <AlertCircle className="w-3 h-3" />
-                                Add Google Maps API key for real map
-                            </div>
-                        )}
-                    </div>
-                </div>
-                <FallbackMap vendors={vendors} selectedVendor={selectedVendor} onSelectVendor={onSelectVendor} />
-            </div>
+        campFeature.setStyle(
+            new Style({
+                image: new CircleStyle({
+                    radius: 12,
+                    fill: new Fill({ color: '#2563eb' }),
+                    stroke: new Stroke({ color: '#ffffff', width: 3 }),
+                }),
+                text: new Text({
+                    text: '🏠',
+                    font: '16px sans-serif',
+                    offsetY: 1,
+                }),
+            })
         );
-    }
 
-    if (!isLoaded) {
-        return (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden h-full min-h-[500px] flex items-center justify-center">
-                <div className="text-gray-500">Loading map...</div>
-            </div>
-        );
-    }
+        // Create vendor marker features
+        const vendorFeatures = vendors.map((vendor, index) => {
+            const position = getVendorPosition(vendor, index, vendors.length);
+            const feature = new Feature({
+                geometry: new Point(fromLonLat(position)),
+                vendor: vendor,
+                type: 'vendor',
+            });
+
+            const color = getMarkerColor(vendor);
+            const isSelected = selectedVendor?.id === vendor.id;
+
+            feature.setStyle(
+                new Style({
+                    image: new CircleStyle({
+                        radius: isSelected ? 14 : 10,
+                        fill: new Fill({ color }),
+                        stroke: new Stroke({
+                            color: isSelected ? '#3b82f6' : '#ffffff',
+                            width: isSelected ? 3 : 2
+                        }),
+                    }),
+                })
+            );
+
+            return feature;
+        });
+
+        // Create distance circles (10km, 25km, 50km)
+        const distanceCircles = [10, 25, 50].map((km) => {
+            const circle = new Feature({
+                geometry: new Circle(fromLonLat(CAMP_CENTER), km * 1000),
+            });
+            circle.setStyle(
+                new Style({
+                    stroke: new Stroke({
+                        color: 'rgba(156, 163, 175, 0.4)',
+                        width: 1,
+                        lineDash: [10, 10],
+                    }),
+                    fill: new Fill({
+                        color: 'rgba(0, 0, 0, 0)',
+                    }),
+                })
+            );
+            return circle;
+        });
+
+        // Vector source and layer for markers
+        const vectorSource = new VectorSource({
+            features: [campFeature, ...vendorFeatures, ...distanceCircles],
+        });
+
+        const vectorLayer = new VectorLayer({
+            source: vectorSource,
+        });
+
+        // Create the map
+        const map = new Map({
+            target: mapRef.current,
+            layers: [
+                new TileLayer({
+                    source: new OSM(),
+                }),
+                vectorLayer,
+            ],
+            view: new View({
+                center: fromLonLat(CAMP_CENTER),
+                zoom: 10,
+            }),
+        });
+
+        // Create popup overlay
+        const popup = new Overlay({
+            element: popupRef.current!,
+            positioning: 'bottom-center',
+            stopEvent: false,
+            offset: [0, -15],
+        });
+        map.addOverlay(popup);
+
+        // Handle click events
+        map.on('click', (event) => {
+            const feature = map.forEachFeatureAtPixel(event.pixel, (feature) => feature);
+            if (feature && feature.get('type') === 'vendor') {
+                const vendor = feature.get('vendor');
+                onSelectVendor(vendor);
+                setPopupContent(vendor);
+                popup.setPosition(event.coordinate);
+            } else {
+                setPopupContent(null);
+                popup.setPosition(undefined);
+            }
+        });
+
+        // Change cursor on hover
+        map.on('pointermove', (event) => {
+            const hit = map.hasFeatureAtPixel(event.pixel, {
+                layerFilter: (layer) => layer === vectorLayer,
+            });
+            map.getTargetElement().style.cursor = hit ? 'pointer' : '';
+        });
+
+        mapInstanceRef.current = map;
+
+        return () => {
+            map.setTarget(undefined);
+        };
+    }, [vendors, selectedVendor, onSelectVendor]);
+
+    // Update vendor styles when selection changes
+    useEffect(() => {
+        if (!mapInstanceRef.current) return;
+
+        const vectorLayer = mapInstanceRef.current.getLayers().getArray()[1] as VectorLayer<VectorSource>;
+        const source = vectorLayer.getSource();
+
+        source?.getFeatures().forEach((feature) => {
+            if (feature.get('type') === 'vendor') {
+                const vendor = feature.get('vendor');
+                const color = getMarkerColor(vendor);
+                const isSelected = selectedVendor?.id === vendor.id;
+
+                feature.setStyle(
+                    new Style({
+                        image: new CircleStyle({
+                            radius: isSelected ? 14 : 10,
+                            fill: new Fill({ color }),
+                            stroke: new Stroke({
+                                color: isSelected ? '#3b82f6' : '#ffffff',
+                                width: isSelected ? 3 : 2
+                            }),
+                        }),
+                    })
+                );
+            }
+        });
+    }, [selectedVendor]);
 
     return (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden h-full min-h-[500px]">
+            {/* Header */}
             <div className="px-4 py-3 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-white">
-                <h3 className="font-semibold text-gray-900">Vendor Map</h3>
-                <p className="text-xs text-gray-500">Click markers to view vendor details</p>
+                <div className="flex items-center justify-between">
+                    <div>
+                        <h3 className="font-semibold text-gray-900">Vendor Map</h3>
+                        <p className="text-xs text-gray-500">Click markers to view vendor details • Powered by OpenStreetMap</p>
+                    </div>
+                </div>
             </div>
 
-            <div className="h-[450px]">
-                <GoogleMap
-                    mapContainerStyle={mapContainerStyle}
-                    center={CAMP_CENTER}
-                    zoom={11}
-                    options={mapOptions}
-                    onClick={onMapClick}
-                >
-                    {/* Camp marker */}
-                    <Marker
-                        position={CAMP_CENTER}
-                        icon={{
-                            path: 'M-10,0a10,10 0 1,0 20,0a10,10 0 1,0 -20,0',
-                            fillColor: '#2563eb',
-                            fillOpacity: 1,
-                            strokeColor: '#ffffff',
-                            strokeWeight: 3,
-                            scale: 1.5,
-                        }}
-                        title="Camp Kakuma"
-                    />
+            {/* Map Container */}
+            <div ref={mapRef} className="h-[450px] w-full" />
 
-                    {/* Distance circles */}
-                    {[10, 25, 50].map((radius) => (
-                        <Circle
-                            key={radius}
-                            center={CAMP_CENTER}
-                            radius={radius * 1000}
-                            options={{
-                                strokeColor: '#9ca3af',
-                                strokeOpacity: 0.5,
-                                strokeWeight: 1,
-                                fillOpacity: 0,
-                            }}
-                        />
-                    ))}
-
-                    {/* Vendor markers */}
-                    {vendors.map((vendor, index) => {
-                        const position = getVendorPosition(vendor, index, vendors.length);
-                        const markerColor = getMarkerColor(vendor);
-                        const isSelected = selectedVendor?.id === vendor.id;
-
-                        return (
-                            <React.Fragment key={vendor.id}>
-                                <Marker
-                                    position={position}
-                                    icon={{
-                                        path: 'M-8,0a8,8 0 1,0 16,0a8,8 0 1,0 -16,0',
-                                        fillColor: markerColor,
-                                        fillOpacity: 1,
-                                        strokeColor: isSelected ? '#3b82f6' : '#ffffff',
-                                        strokeWeight: isSelected ? 3 : 2,
-                                        scale: isSelected ? 1.3 : 1,
-                                    }}
-                                    title={vendor.name}
-                                    onClick={() => handleMarkerClick(vendor)}
-                                />
-                                {activeMarker === vendor.id && (
-                                    <InfoWindow
-                                        position={position}
-                                        onCloseClick={() => setActiveMarker(null)}
-                                    >
-                                        <div className="p-2 min-w-[150px]">
-                                            <h4 className="font-semibold text-gray-900">{vendor.name}</h4>
-                                            <p className="text-sm text-gray-600">{vendor.distance} km away</p>
-                                            <p className="text-sm text-gray-600">Rating: {vendor.rating}★</p>
-                                            <div className="mt-2 flex gap-1 flex-wrap">
-                                                {vendor.certifications.map((cert, i) => (
-                                                    <span key={i} className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded">
-                                                        {cert}
-                                                    </span>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    </InfoWindow>
-                                )}
-                            </React.Fragment>
-                        );
-                    })}
-                </GoogleMap>
+            {/* Popup */}
+            <div ref={popupRef} className={popupContent ? 'block' : 'hidden'}>
+                {popupContent && (
+                    <div className="bg-white rounded-lg shadow-lg p-3 min-w-[180px] border border-gray-200">
+                        <h4 className="font-semibold text-gray-900">{popupContent.name}</h4>
+                        <p className="text-sm text-gray-600">{popupContent.distance} km away</p>
+                        <p className="text-sm text-gray-600">Rating: {popupContent.rating}★</p>
+                        <div className="mt-2 flex gap-1 flex-wrap">
+                            {popupContent.certifications.slice(0, 2).map((cert, i) => (
+                                <span key={i} className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded">
+                                    {cert}
+                                </span>
+                            ))}
+                        </div>
+                        <button
+                            onClick={() => onSelectVendor(popupContent)}
+                            className="mt-2 w-full text-xs bg-blue-600 text-white py-1.5 rounded hover:bg-blue-700 transition-colors"
+                        >
+                            View Details
+                        </button>
+                    </div>
+                )}
             </div>
 
             {/* Legend */}
             <div className="px-4 py-2 bg-gray-50 border-t border-gray-200">
-                <div className="flex items-center gap-4 text-xs">
-                    <span className="text-gray-500">Agent Scores:</span>
-                    <div className="flex items-center gap-1">
-                        <div className="w-3 h-3 rounded-full bg-green-500" />
-                        <span>High</span>
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4 text-xs">
+                        <span className="text-gray-500">Agent Scores:</span>
+                        <div className="flex items-center gap-1">
+                            <div className="w-3 h-3 rounded-full bg-green-500" />
+                            <span>High (&gt;85%)</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                            <div className="w-3 h-3 rounded-full bg-yellow-400" />
+                            <span>Medium (70-85%)</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                            <div className="w-3 h-3 rounded-full bg-gray-400" />
+                            <span>Lower (&lt;70%)</span>
+                        </div>
                     </div>
-                    <div className="flex items-center gap-1">
-                        <div className="w-3 h-3 rounded-full bg-yellow-400" />
-                        <span>Medium</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                        <div className="w-3 h-3 rounded-full bg-gray-400" />
-                        <span>Lower</span>
+                    <div className="flex items-center gap-1 text-xs text-gray-500">
+                        <div className="w-3 h-3 rounded-full bg-blue-600" />
+                        <span>Camp</span>
                     </div>
                 </div>
             </div>

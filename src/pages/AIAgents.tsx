@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { Layout } from '../components/layout/Layout';
 import { AIChat } from '../components/shared/AIChat';
+import { AgentAnalyticsModal } from '../components/shared/AgentAnalyticsModal';
 import {
-  Brain, Power, TrendingUp, AlertCircle, CheckCircle, Clock,
+  Brain, Power, TrendingUp, AlertCircle, CheckCircle,
   Zap, Users, Leaf, DollarSign, Eye, MessageCircle, Activity,
   PlayCircle, PauseCircle, BarChart2
 } from 'lucide-react';
-import { mockAgents } from '../data/mockData';
+import { mockAgents, Agent } from '../data/mockData';
 import { useTheme } from '../context/ThemeContext';
 
 export const AIAgents: React.FC = () => {
@@ -16,6 +17,8 @@ export const AIAgents: React.FC = () => {
   const [chatOpen, setChatOpen] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState<string>('Meta Orchestrator');
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
+  const [analyticsOpen, setAnalyticsOpen] = useState(false);
+  const [analyticsAgent, setAnalyticsAgent] = useState<Agent | null>(null);
 
   const toggleAgent = (agentId: string) => {
     setAgents(prev => prev.map(agent =>
@@ -28,6 +31,11 @@ export const AIAgents: React.FC = () => {
   const openChatWithAgent = (agentName: string) => {
     setSelectedAgent(agentName);
     setChatOpen(true);
+  };
+
+  const openAnalytics = (agent: Agent) => {
+    setAnalyticsAgent(agent);
+    setAnalyticsOpen(true);
   };
 
   const activeCount = agents.filter(a => a.status === 'active').length;
@@ -231,10 +239,13 @@ export const AIAgents: React.FC = () => {
                       <MessageCircle className="w-4 h-4" />
                       Chat
                     </button>
-                    <button className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 border rounded-lg transition-colors font-medium ${isDark
-                        ? 'border-gray-600 text-gray-300 hover:bg-gray-700'
-                        : 'border-gray-300 text-gray-700 hover:bg-gray-50'
-                      }`}>
+                    <button
+                      onClick={() => openAnalytics(agent)}
+                      className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 border rounded-lg transition-colors font-medium ${isDark
+                          ? 'border-gray-600 text-gray-300 hover:bg-gray-700'
+                          : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+                        }`}
+                    >
                       <BarChart2 className="w-4 h-4" />
                       Analytics
                     </button>
@@ -276,6 +287,13 @@ export const AIAgents: React.FC = () => {
         isOpen={chatOpen}
         onClose={() => setChatOpen(false)}
         selectedAgent={selectedAgent}
+      />
+
+      {/* Analytics Modal */}
+      <AgentAnalyticsModal
+        isOpen={analyticsOpen}
+        onClose={() => setAnalyticsOpen(false)}
+        agent={analyticsAgent}
       />
     </Layout>
   );
